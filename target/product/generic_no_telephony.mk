@@ -32,6 +32,7 @@ PRODUCT_PACKAGES := \
     Gallery2 \
     LatinIME \
     Launcher2 \
+	FileExplorer \
     MusicFX \
     MusicVisualization \
     NoiseField \
