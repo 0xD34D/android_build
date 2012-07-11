@@ -78,6 +78,13 @@ INTERNAL_DALVIK_MODULES:=
 # All findbugs xml files
 ALL_FINDBUGS_FILES:=
 
+# GPL module license files
+ALL_GPL_MODULE_LICENSE_FILES:=
+
+# Generated class file names for Android resource.
+# They are escaped and quoted so can be passed safely to a bash command.
+ANDROID_RESOURCE_GENERATED_CLASSES := 'R.class' 'R$$*.class' 'Manifest.class' 'Manifest$$*.class'
+
 ###########################################################
 ## Debugging; prints a variable list to stdout
 ###########################################################
@@ -110,11 +117,11 @@ endef
 # Figure out where we are.
 define my-dir
 $(strip \
-  $(eval md_file_ := $$(lastword $$(MAKEFILE_LIST))) \
-  $(if $(filter $(CLEAR_VARS),$(md_file_)), \
+  $(eval LOCAL_MODULE_MAKEFILE := $$(lastword $$(MAKEFILE_LIST))) \
+  $(if $(filter $(CLEAR_VARS),$(LOCAL_MODULE_MAKEFILE)), \
     $(error LOCAL_PATH must be set before including $$(CLEAR_VARS)) \
    , \
-    $(patsubst %/,%,$(dir $(md_file_))) \
+    $(patsubst %/,%,$(dir $(LOCAL_MODULE_MAKEFILE))) \
    ) \
  )
 endef
@@ -802,6 +809,7 @@ $(hide) $(PRIVATE_RS_CC) \
   -d $(PRIVATE_RS_OUTPUT_DIR) \
   -a $@ -MD \
   $(addprefix -target-api , $(PRIVATE_RS_TARGET_API)) \
+  $(PRIVATE_RS_FLAGS) \
   $(foreach inc,$(PRIVATE_RS_INCLUDES),$(addprefix -I , $(inc))) \
   $(PRIVATE_RS_SOURCE_FILES)
 #$(hide) $(LLVM_RS_LINK) \
@@ -848,7 +856,7 @@ $(hide) for f in $(PRIVATE_PROTO_SRC_FILES); do \
         $(addprefix --proto_path=, $(PRIVATE_PROTO_INCLUDES)) \
         $(PRIVATE_PROTO_JAVA_OUTPUT_OPTION)=$(PRIVATE_PROTO_JAVA_OUTPUT_DIR) \
         $(PRIVATE_PROTOC_FLAGS) \
-        $$f; \
+        $$f || exit 33; \
         done
 $(hide) touch $@
 endef
@@ -872,9 +880,10 @@ endef
 
 define transform-cpp-to-o
 @mkdir -p $(dir $@)
-@echo -e ${CL_PFX}"target $(PRIVATE_ARM_MODE) C++:"${CL_RST}" $(PRIVATE_MODULE) <= $<"
+@echo "target $(PRIVATE_ARM_MODE) C++: $(PRIVATE_MODULE) <= $<"
 $(hide) $(PRIVATE_CXX) \
 	$(addprefix -I , $(PRIVATE_C_INCLUDES)) \
+	@$(PRIVATE_IMPORT_INCLUDES) \
 	$(addprefix -isystem ,\
 	    $(if $(PRIVATE_NO_DEFAULT_COMPILER_FLAGS),, \
 	        $(filter-out $(PRIVATE_C_INCLUDES), \
@@ -890,7 +899,7 @@ $(hide) $(PRIVATE_CXX) \
 	$(PRIVATE_CFLAGS) \
 	$(PRIVATE_CPPFLAGS) \
 	$(PRIVATE_DEBUG_CFLAGS) \
-	-MD -o $@ $<
+	-MD -MF $(patsubst %.o,%.d,$@) -o $@ $<
 $(transform-d-to-p)
 endef
 
@@ -904,6 +913,7 @@ define transform-c-or-s-to-o-no-deps
 @mkdir -p $(dir $@)
 $(hide) $(PRIVATE_CC) \
 	$(addprefix -I , $(PRIVATE_C_INCLUDES)) \
+	@$(PRIVATE_IMPORT_INCLUDES) \
 	$(addprefix -isystem ,\
 	    $(if $(PRIVATE_NO_DEFAULT_COMPILER_FLAGS),, \
 	        $(filter-out $(PRIVATE_C_INCLUDES), \
@@ -917,16 +927,16 @@ $(hide) $(PRIVATE_CC) \
 	$(PRIVATE_CFLAGS) \
 	$(1) \
 	$(PRIVATE_DEBUG_CFLAGS) \
-	-MD -o $@ $<
+	-MD -MF $(patsubst %.o,%.d,$@) -o $@ $<
 endef
 
 define transform-c-to-o-no-deps
-@echo -e ${CL_PFX}"target $(PRIVATE_ARM_MODE) C:"${CL_RST}" $(PRIVATE_MODULE) <= $<"
+@echo "target $(PRIVATE_ARM_MODE) C: $(PRIVATE_MODULE) <= $<"
 $(call transform-c-or-s-to-o-no-deps, )
 endef
 
 define transform-s-to-o-no-deps
-@echo -e ${CL_PFX}"target asm:"${CL_RST}" $(PRIVATE_MODULE) <= $<"
+@echo "target asm: $(PRIVATE_MODULE) <= $<"
 $(call transform-c-or-s-to-o-no-deps, $(PRIVATE_ASFLAGS))
 endef
 
@@ -947,7 +957,7 @@ endef
 ###########################################################
 
 define transform-m-to-o-no-deps
-@echo -e ${CL_PFX}"target ObjC:"${CL_RST}" $(PRIVATE_MODULE) <= $<"
+@echo "target ObjC: $(PRIVATE_MODULE) <= $<"
 $(call transform-c-or-s-to-o-no-deps)
 endef
 
@@ -965,6 +975,7 @@ define transform-host-cpp-to-o
 @echo "host C++: $(PRIVATE_MODULE) <= $<"
 $(hide) $(PRIVATE_CXX) \
 	$(addprefix -I , $(PRIVATE_C_INCLUDES)) \
+	@$(PRIVATE_IMPORT_INCLUDES) \
 	$(addprefix -isystem ,\
 	    $(if $(PRIVATE_NO_DEFAULT_COMPILER_FLAGS),, \
 	        $(filter-out $(PRIVATE_C_INCLUDES), \
@@ -978,7 +989,7 @@ $(hide) $(PRIVATE_CXX) \
 	$(PRIVATE_CFLAGS) \
 	$(PRIVATE_CPPFLAGS) \
 	$(PRIVATE_DEBUG_CFLAGS) \
-	-MD -o $@ $<
+	-MD -MF $(patsubst %.o,%.d,$@) -o $@ $<
 $(transform-d-to-p)
 endef
 
@@ -992,6 +1003,7 @@ define transform-host-c-or-s-to-o-no-deps
 @mkdir -p $(dir $@)
 $(hide) $(PRIVATE_CC) \
 	$(addprefix -I , $(PRIVATE_C_INCLUDES)) \
+	@$(PRIVATE_IMPORT_INCLUDES) \
 	$(addprefix -isystem ,\
 	    $(if $(PRIVATE_NO_DEFAULT_COMPILER_FLAGS),, \
 	        $(filter-out $(PRIVATE_C_INCLUDES), \
@@ -1004,7 +1016,7 @@ $(hide) $(PRIVATE_CC) \
 	$(PRIVATE_CFLAGS) \
 	$(1) \
 	$(PRIVATE_DEBUG_CFLAGS) \
-	-MD -o $@ $<
+	-MD -MF $(patsubst %.o,%.d,$@) -o $@ $<
 endef
 
 define transform-host-c-to-o-no-deps
@@ -1104,7 +1116,7 @@ $(hide) ldir=$(PRIVATE_INTERMEDIATES_DIR)/WHOLE/$(basename $(notdir $(1)))_objs;
     rm -rf $$ldir; \
     mkdir -p $$ldir; \
     filelist=; \
-    for f in `$(HOST_AR) t $(1) | grep '\.o$$'`; do \
+    for f in `$(HOST_AR) t $(1) | \grep '\.o$$'`; do \
         $(HOST_AR) p $(1) $$f > $$ldir/$$f; \
         filelist="$$filelist $$ldir/$$f"; \
     done ; \
@@ -1444,7 +1456,8 @@ $(hide) if [ -d "$(PRIVATE_SOURCE_INTERMEDIATES_DIR)" ]; then \
 fi
 $(hide) tr ' ' '\n' < $(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list \
     | sort -u > $(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list-uniq
-$(hide) $(1) -encoding UTF-8 \
+$(hide) if [ -s $(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list-uniq ] ; then \
+    $(1) -encoding UTF-8 \
     $(strip $(PRIVATE_JAVAC_DEBUG_FLAGS)) \
     $(if $(findstring true,$(LOCAL_WARNINGS_ENABLE)),$(xlint_unchecked),) \
     $(2) \
@@ -1454,15 +1467,20 @@ $(hide) $(1) -encoding UTF-8 \
     -extdirs "" -d $(PRIVATE_CLASS_INTERMEDIATES_DIR) \
     $(PRIVATE_JAVACFLAGS) \
     \@$(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list-uniq \
-    || ( rm -rf $(PRIVATE_CLASS_INTERMEDIATES_DIR) ; exit 41 )
+    || ( rm -rf $(PRIVATE_CLASS_INTERMEDIATES_DIR) ; exit 41 ) \
+fi
 $(hide) rm -f $(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list
 $(hide) rm -f $(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list-uniq
+$(if $(PRIVATE_JAR_EXCLUDE_FILES), $(hide) find $(PRIVATE_CLASS_INTERMEDIATES_DIR) \
+    -name $(word 1, $(PRIVATE_JAR_EXCLUDE_FILES)) \
+    $(addprefix -o -name , $(wordlist 2, 999, $(PRIVATE_JAR_EXCLUDE_FILES))) \
+    | xargs rm -rf)
 $(hide) jar $(if $(strip $(PRIVATE_JAR_MANIFEST)),-cfm,-cf) \
     $@ $(PRIVATE_JAR_MANIFEST) -C $(PRIVATE_CLASS_INTERMEDIATES_DIR) .
 endef
 
 define transform-java-to-classes.jar
-@echo -e ${CL_PFX}"target Java:"${CL_RST}" $(PRIVATE_MODULE) ($(PRIVATE_CLASS_INTERMEDIATES_DIR))"
+@echo "target Java: $(PRIVATE_MODULE) ($(PRIVATE_CLASS_INTERMEDIATES_DIR))"
 $(call compile-java,$(TARGET_JAVAC),$(PRIVATE_BOOTCLASSPATH))
 $(hide) rm -rf $(PRIVATE_CLASS_INTERMEDIATES_DIR)
 endef
@@ -1501,13 +1519,17 @@ fi
 $(hide) rm -f $(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list
 $(hide) rm -f $(PRIVATE_CLASS_INTERMEDIATES_DIR)/java-source-list-uniq
 $(hide) rm -f $@
+$(if $(PRIVATE_JAR_EXCLUDE_FILES), $(hide) find $(PRIVATE_CLASS_INTERMEDIATES_DIR) \
+    -name $(word 1, $(PRIVATE_JAR_EXCLUDE_FILES)) \
+    $(addprefix -o -name , $(wordlist 2, 999, $(PRIVATE_JAR_EXCLUDE_FILES))) \
+    | xargs rm -rf)
 $(hide) jar $(if $(strip $(PRIVATE_JAR_MANIFEST)),-cfm,-cf) \
     $@ $(PRIVATE_JAR_MANIFEST) -C $(PRIVATE_CLASS_INTERMEDIATES_DIR) .
 $(hide) mv $(PRIVATE_CLASS_INTERMEDIATES_DIR)/newstamp $(PRIVATE_CLASS_INTERMEDIATES_DIR)/stamp
 endef
 
 define transform-java-to-classes.jar
-@echo -e ${CL_PFX}"target Java:"${CL_RST}" $(PRIVATE_MODULE) ($(PRIVATE_CLASS_INTERMEDIATES_DIR))"
+@echo "target Java: $(PRIVATE_MODULE) ($(PRIVATE_CLASS_INTERMEDIATES_DIR))"
 $(call compile-java,$(TARGET_JAVAC),$(PRIVATE_BOOTCLASSPATH))
 endef
 endif # ENABLE_INCREMENTALJAVAC
@@ -1525,7 +1547,7 @@ define transform-classes.jar-to-dex
 @echo "target Dex: $(PRIVATE_MODULE)"
 @mkdir -p $(dir $@)
 $(hide) $(DX) \
-    $(if $(findstring windows,$(HOST_OS)),,-JXms16M -JXmx1536M) \
+    $(if $(findstring windows,$(HOST_OS)),,-JXms16M -JXmx2048M) \
     --dex --output=$@ \
     $(incremental_dex) \
     $(if $(NO_OPTIMIZE_DX), \
@@ -1693,6 +1715,16 @@ $(2): $(1) | $(ACP)
 	$$(copy-file-to-target)
 endef
 
+# Copy the file only if it's a well-formed xml file. For use via $(eval).
+# $(1): source file
+# $(2): destination file, must end with .xml.
+define copy-xml-file-checked
+$(2): $(1) | $(ACP)
+	@echo "Copy xml: $$@"
+	$(hide) xmllint $$< >/dev/null  # Don't print the xml file to stdout.
+	$$(copy-file-to-target)
+endef
+
 # The -t option to acp and the -p option to cp is
 # required for OSX.  OSX has a ridiculous restriction
 # where it's an error for a .a file's modification time
@@ -1825,7 +1857,7 @@ endef
 ###########################################################
 
 define transform-generated-source
-@echo -e ${CL_PFX}"target Generated:"${CL_RST}" $(PRIVATE_MODULE) <= $<"
+@echo "target Generated: $(PRIVATE_MODULE) <= $<"
 @mkdir -p $(dir $@)
 $(hide) $(PRIVATE_CUSTOM_TOOL)
 endef
@@ -1865,7 +1897,6 @@ $(if $(2), \
   size=$$(for i in $(1); do $(call get-file-size,$$i); echo +; done; echo 0); \
   total=$$(( $$( echo "$$size" ) )); \
   printname=$$(echo -n "$(1)" | tr " " +); \
-  echo "$$printname total size is $$total"; \
   img_blocksize=$(call image-size-from-data-size,$(BOARD_FLASH_BLOCK_SIZE)); \
   if [ "$(3)" == "yaffs" ]; then \
     reservedblocks=8; \
@@ -1877,6 +1908,7 @@ $(if $(2), \
   reserve=$$(((twoblocks > onepct ? twoblocks : onepct) + \
                reservedblocks * img_blocksize)); \
   maxsize=$$(($(2) - reserve)); \
+  echo "$$printname maxsize=$$maxsize blocksize=$$img_blocksize total=$$total reserve=$$reserve"; \
   if [ "$$total" -gt "$$maxsize" ]; then \
     echo "error: $$printname too large ($$total > [$(2) - $$reserve])"; \
     false; \
@@ -1913,6 +1945,21 @@ define add-radio-file
 endef
 define add-radio-file-internal
 INSTALLED_RADIOIMAGE_TARGET += $$(PRODUCT_OUT)/$(2)
+$$(PRODUCT_OUT)/$(2) : $$(LOCAL_PATH)/$(1) | $$(ACP)
+	$$(transform-prebuilt-to-target)
+endef
+
+# Version of add-radio-file that also arranges for the version of the
+# file to be checked against the contents of
+# $(TARGET_BOARD_INFO_FILE).
+# $(1): filename
+# $(2): name of version variable in board-info (eg, "version-baseband")
+define add-radio-file-checked
+  $(eval $(call add-radio-file-checked-internal,$(1),$(notdir $(1)),$(2)))
+endef
+define add-radio-file-checked-internal
+INSTALLED_RADIOIMAGE_TARGET += $$(PRODUCT_OUT)/$(2)
+BOARD_INFO_CHECK += $(3):$(LOCAL_PATH)/$(1)
 $$(PRODUCT_OUT)/$(2) : $$(LOCAL_PATH)/$(1) | $$(ACP)
 	$$(transform-prebuilt-to-target)
 endef
@@ -1970,6 +2017,19 @@ define set-inherited-package-variables-internal
   ,)
 endef
 
+###########################################################
+## Expand a module name list with REQUIRED modules
+###########################################################
+# $(1): The variable name that holds the initial module name list.
+#       the variable will be modified to hold the expanded results.
+# $(2): The initial module name list.
+# Returns empty string (maybe with some whitespaces).
+define expand-required-modules
+$(eval _erm_new_modules := $(sort $(filter-out $($(1)),\
+  $(foreach m,$(2),$(ALL_MODULES.$(m).REQUIRED)))))\
+$(if $(_erm_new_modules),$(eval $(1) += $(_erm_new_modules))\
+  $(call expand-required-modules,$(1),$(_erm_new_modules)))
+endef
 
 ###########################################################
 ## Other includes
